@@ -1,0 +1,11 @@
+# Keep the build context small and make sure a host-built jar can never leak
+# into the image — the Dockerfile builds the jar itself, inside the container.
+target/
+.git/
+.github/
+.idea/
+.vscode/
+.mvn/
+mvnw
+mvnw.cmd
+*.md

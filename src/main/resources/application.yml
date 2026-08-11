@@ -1,0 +1,28 @@
+spring:
+  application:
+    name: RateLimiterService
+
+  data:
+    redis:
+      # Defaults let the app run against a local Redis outside Docker;
+      # docker-compose supplies REDIS_HOST=redis / REDIS_PORT=6379 to BOTH
+      # instances, so the two JVMs point at the one shared Redis.
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+      # Redis sits on the request path now, so a hung call would hold a Tomcat
+      # thread indefinitely. 250ms bounds that: comfortably above a healthy
+      # RTT + Lua exec, low enough to fail fast instead of stalling the filter.
+      timeout: 250ms
+
+      lettuce:
+        pool:
+          # Lettuce multiplexes over a single connection, so the pool matters
+          # far less than it would with Jedis. Capped at 16 to bound the
+          # connection fan-in when two instances hammer one Redis.
+          max-active: 16
+
+# Per-client token bucket: burst capacity and sustained refill rate (tokens/sec)
+ratelimiter:
+  capacity: 10
+  refill-rate: 5.0
