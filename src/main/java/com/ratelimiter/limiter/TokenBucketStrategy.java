@@ -68,25 +68,6 @@ public class TokenBucketStrategy implements RateLimiterStrategy {
                 Double.toString(refillRate),
                 Integer.toString(weight));
 
-        if (reply == null || reply.size() < 3) {
-            throw new IllegalStateException(
-                    "token_bucket.lua returned an unexpected reply for " + key + ": " + reply);
-        }
-
-        long allowed = asLong(reply.get(0));
-        long retryAfterMillis = asLong(reply.get(1));
-        long remaining = asLong(reply.get(2));
-
-        return allowed == 1L
-                ? RateLimitResult.allow(remaining)
-                : RateLimitResult.deny(retryAfterMillis, remaining);
-    }
-
-    /** Tolerant of the client surfacing a reply as a number or a string. */
-    private static long asLong(Object value) {
-        if (value instanceof Number number) {
-            return number.longValue();
-        }
-        return Long.parseLong(String.valueOf(value));
+        return ScriptReply.toResult(reply, "token_bucket.lua", key);
     }
 }

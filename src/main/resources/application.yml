@@ -22,7 +22,16 @@ spring:
           # connection fan-in when two instances hammer one Redis.
           max-active: 16
 
-# Per-client token bucket: burst capacity and sustained refill rate (tokens/sec)
 ratelimiter:
+  # Active algorithm: tb (token bucket) | swl (sliding window log) | swc (counter).
+  # All three are registered; this only picks which one the filter uses.
+  algorithm: tb
+
+  # Token bucket: burst capacity and sustained refill rate (tokens/sec).
   capacity: 10
   refill-rate: 5.0
+
+  # Sliding window (log and counter): at most `limit` requests per `window-ms`.
+  # Shared by both so they can be compared under the same load.
+  limit: 100
+  window-ms: 60000
