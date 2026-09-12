@@ -1,8 +1,15 @@
 HELP.md
 target/
 
+### k6 run output (regenerated on every run) ###
+k6/summary.txt
+k6/summary.json
+k6/fail-open-summary.txt
+k6/fail-open-summary.json
+
 ### Personal — not for the public repo ###
 NOTES.md
+PROJECT_BRIEF.md
 
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/

@@ -1,0 +1,17 @@
+# Overlay that turns the circuit breaker off, for the contrast run.
+#
+#   docker compose -f docker-compose.yml -f k6/compose.no-breaker.yml up -d app1 app2
+#   ./k6/run-failopen.sh
+#   docker compose up -d app1 app2        # back to normal
+#
+# Without the breaker every request during an outage pays the full 50ms Redis
+# command timeout before the failure mode is applied. That is the number the
+# breaker exists to remove, and this file is how you see it.
+
+services:
+  app1:
+    environment:
+      RATELIMITER_BREAKER_ENABLED: "false"
+  app2:
+    environment:
+      RATELIMITER_BREAKER_ENABLED: "false"

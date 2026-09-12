@@ -1,11 +1,7 @@
 package com.ratelimiter.limiter;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
-import org.springframework.stereotype.Component;
 
 import java.util.List;
 
@@ -16,12 +12,11 @@ import java.util.List;
  * {@link RateLimiterStrategy}. Algorithm and atomicity are unchanged, which is
  * why {@code DistributedRaceTest} still passes untouched.
  *
- * <p>The script bean moved here from {@code RedisConfig}: a strategy owns its
- * state representation, so it owns the code that manipulates it.
- * {@link DefaultRedisScript} still caches the SHA1, so Spring invokes it with
- * EVALSHA and only falls back to EVAL on NOSCRIPT.
+ * <p>Phase 2 makes this one instance per rule rather than one bean: the capacity
+ * and refill rate a rule configures are still bound at construction, so
+ * {@link RateLimiterStrategy} never had to grow a config parameter. The loaded
+ * script comes from {@link LuaScripts} so N rules do not mean N SCRIPT LOADs.
  */
-@Component
 public class TokenBucketStrategy implements RateLimiterStrategy {
 
     private final StringRedisTemplate redis;
@@ -36,16 +31,13 @@ public class TokenBucketStrategy implements RateLimiterStrategy {
 
     @SuppressWarnings("rawtypes")
     public TokenBucketStrategy(StringRedisTemplate redis,
-                               @Value("${ratelimiter.capacity:10}") int capacity,
-                               @Value("${ratelimiter.refill-rate:5.0}") double refillRate) {
+                               RedisScript<List> script,
+                               int capacity,
+                               double refillRate) {
         this.redis = redis;
+        this.script = script; // {allowed, retryAfterMillis, remaining}
         this.capacity = capacity;
         this.refillRate = refillRate;
-
-        DefaultRedisScript<List> tokenBucket = new DefaultRedisScript<>();
-        tokenBucket.setLocation(new ClassPathResource("scripts/token_bucket.lua"));
-        tokenBucket.setResultType(List.class); // {allowed, retryAfterMillis, remaining}
-        this.script = tokenBucket;
     }
 
     @Override

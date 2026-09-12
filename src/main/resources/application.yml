@@ -10,10 +10,14 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
-      # Redis sits on the request path now, so a hung call would hold a Tomcat
-      # thread indefinitely. 250ms bounds that: comfortably above a healthy
-      # RTT + Lua exec, low enough to fail fast instead of stalling the filter.
-      timeout: 250ms
+      # THE hard client-side timeout. Redis sits on the request path, so a hung
+      # call would hold a Tomcat thread; this bounds it. Tightened from 250ms in
+      # Phase 2: a healthy RTT plus Lua exec is sub-millisecond locally and low
+      # single-digit ms across a cluster, so 50ms is ~10x headroom and still far
+      # under any caller's patience. Wrapping the call in a future with its own
+      # deadline was rejected — it adds a thread hop per request and would not
+      # cancel the in-flight command anyway.
+      timeout: 50ms
 
       lettuce:
         pool:
@@ -23,15 +27,108 @@ spring:
           max-active: 16
 
 ratelimiter:
-  # Active algorithm: tb (token bucket) | swl (sliding window log) | swc (counter).
-  # All three are registered; this only picks which one the filter uses.
-  algorithm: tb
+  # ---------------------------------------------------------------------------
+  # GLOBAL DEFAULT RULE. These are the Phase 1 property names, unchanged, and
+  # they are now the bottom rung of the specificity ladder: the rule that
+  # guarantees every request resolves to something. Config for all three
+  # algorithms lives here at once so switching the active one stays a
+  # single-property change; override rules below must be self-describing.
+  # ---------------------------------------------------------------------------
+  algorithm: tb        # tb (token bucket) | swl (window log) | swc (window counter)
 
-  # Token bucket: burst capacity and sustained refill rate (tokens/sec).
-  capacity: 10
-  refill-rate: 5.0
+  capacity: 10         # token bucket: burst size
+  refill-rate: 5.0     # token bucket: sustained tokens/sec
 
-  # Sliding window (log and counter): at most `limit` requests per `window-ms`.
-  # Shared by both so they can be compared under the same load.
-  limit: 100
-  window-ms: 60000
+  limit: 100           # sliding window: request ceiling
+  window-ms: 60000     # sliding window: width
+
+  # What to do when Redis cannot answer. Fail open by default: the limiter must
+  # not be a bigger outage than the service it protects. Rules that guard
+  # something expensive override this to fail-closed.
+  failure-mode: fail-open
+
+  # Never limited. Gives the load test a baseline through the same JVM and the
+  # same warmed-up code path, with only the Redis round trip removed.
+  exempt-paths:
+    - /api/baseline
+
+  breaker:
+    # Once N calls in a row have failed, the outcome is known; short-circuit to
+    # the failure mode instead of charging every request the full timeout.
+    enabled: true
+    failure-threshold: 5
+    open-duration: 5s
+
+  # ---------------------------------------------------------------------------
+  # COARSE PRE-AUTH TIER, keyed on the remote address. Off by default: every
+  # request in the distributed tests comes from one loopback address, so enabling
+  # it here would throttle the concurrency those tests exist to create. Enabled
+  # in docker-compose, where it is actually exercised.
+  # ---------------------------------------------------------------------------
+  ip:
+    enabled: false
+    rule:
+      algorithm: tb
+      capacity: 2000
+      refill-rate: 1000.0
+    endpoints:
+      "[/api/strict]":
+        algorithm: tb
+        capacity: 500
+        refill-rate: 250.0
+
+  # ---------------------------------------------------------------------------
+  # OVERRIDE TIERS, most specific first when resolved:
+  #   api-key+endpoint > user+endpoint > endpoint > api-key > user > default
+  # First match wins outright. An override REPLACES the rule below it — it does
+  # not tighten it — so a permissive user rule really does beat a strict endpoint
+  # rule. Every override states its own algorithm; nothing is inherited.
+  # Endpoint keys MUST use bracket notation — "[/api/burst]", not "/api/burst".
+  # Without the brackets Boot's relaxed binding canonicalises the key and strips
+  # the slashes, so the rule silently indexes under "apiburst" and never matches.
+  # ---------------------------------------------------------------------------
+  rules:
+    endpoints:
+      # Burst-tolerant, and provisioned ABOVE any rate the load test offers so
+      # essentially every request is admitted. That is deliberate: this endpoint
+      # exists to measure what an ALLOWED request costs, and a rule that started
+      # rejecting would be measuring rejection instead.
+      "[/api/burst]":
+        algorithm: tb
+        capacity: 10000
+        refill-rate: 10000.0
+      # Strict: a hard rolling ceiling, and expensive enough to protect that an
+      # outage should close it rather than leave it unmetered.
+      "[/api/strict]":
+        algorithm: swl
+        limit: 10
+        window-ms: 1000
+        failure-mode: fail-closed
+
+    users:
+      premium:
+        algorithm: tb
+        capacity: 1000
+        refill-rate: 500.0
+
+    api-keys:
+      partner:
+        algorithm: swc
+        limit: 5000
+        window-ms: 60000
+
+    user-endpoints:
+      premium:
+        # Beats the endpoint rule above for this user, and raises the ceiling
+        # rather than lowering it — the override-replaces tradeoff, on purpose.
+        "[/api/strict]":
+          algorithm: swl
+          limit: 100
+          window-ms: 1000
+
+    api-key-endpoints:
+      partner:
+        "[/api/strict]":
+          algorithm: swc
+          limit: 500
+          window-ms: 1000

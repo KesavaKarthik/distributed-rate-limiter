@@ -1,11 +1,7 @@
 package com.ratelimiter.limiter;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
-import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
@@ -18,7 +14,6 @@ import java.util.concurrent.ThreadLocalRandom;
  * admitted requests are logged, so the ZSET size is bounded by the limit and not
  * by how hard a client hammers it.
  */
-@Component
 public class SlidingWindowLogStrategy implements RateLimiterStrategy {
 
     private final StringRedisTemplate redis;
@@ -31,16 +26,13 @@ public class SlidingWindowLogStrategy implements RateLimiterStrategy {
 
     @SuppressWarnings("rawtypes")
     public SlidingWindowLogStrategy(StringRedisTemplate redis,
-                                    @Value("${ratelimiter.limit:100}") int limit,
-                                    @Value("${ratelimiter.window-ms:60000}") long windowMs) {
+                                    RedisScript<List> script,
+                                    int limit,
+                                    long windowMs) {
         this.redis = redis;
+        this.script = script;
         this.limit = limit;
         this.windowMs = windowMs;
-
-        DefaultRedisScript<List> slidingWindowLog = new DefaultRedisScript<>();
-        slidingWindowLog.setLocation(new ClassPathResource("scripts/sliding_window_log.lua"));
-        slidingWindowLog.setResultType(List.class);
-        this.script = slidingWindowLog;
     }
 
     @Override

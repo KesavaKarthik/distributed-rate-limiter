@@ -1,11 +1,7 @@
 package com.ratelimiter.limiter;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
-import org.springframework.stereotype.Component;
 
 import java.util.List;
 
@@ -18,7 +14,6 @@ import java.util.List;
  * — they enforce the same guarantee at different cost, so sharing the config
  * makes them directly comparable under one load test.
  */
-@Component
 public class SlidingWindowCounterStrategy implements RateLimiterStrategy {
 
     private final StringRedisTemplate redis;
@@ -31,16 +26,13 @@ public class SlidingWindowCounterStrategy implements RateLimiterStrategy {
 
     @SuppressWarnings("rawtypes")
     public SlidingWindowCounterStrategy(StringRedisTemplate redis,
-                                        @Value("${ratelimiter.limit:100}") int limit,
-                                        @Value("${ratelimiter.window-ms:60000}") long windowMs) {
+                                        RedisScript<List> script,
+                                        int limit,
+                                        long windowMs) {
         this.redis = redis;
+        this.script = script;
         this.limit = limit;
         this.windowMs = windowMs;
-
-        DefaultRedisScript<List> slidingWindowCounter = new DefaultRedisScript<>();
-        slidingWindowCounter.setLocation(new ClassPathResource("scripts/sliding_window_counter.lua"));
-        slidingWindowCounter.setResultType(List.class);
-        this.script = slidingWindowCounter;
     }
 
     @Override

@@ -1,4 +1,9 @@
-# Phase 1 topology: ONE Redis, TWO identical app JVMs.
+# Topology: ONE Redis, TWO identical app JVMs, one round-robin load balancer.
+#
+# Phase 1 established the first two. Phase 2 adds nginx so the load test drives
+# the pair through a single URL the way real traffic would, and k6 as a profiled
+# service so the generator runs on the same Docker network as its target and the
+# numbers are not measuring a Windows loopback hop.
 #
 # The two app services are deliberately byte-identical — same image, same
 # environment, same container port. The ONLY difference is which host port maps
@@ -44,3 +49,31 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+
+  nginx:
+    image: nginx:alpine
+    container_name: ratelimiter-lb
+    ports:
+      - "8000:80"
+    volumes:
+      - ./k6/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - app1
+      - app2
+
+  # Not started by `docker compose up`. Run it explicitly:
+  #   docker compose --profile load run --rm k6 run /k6/rate-limit-test.js
+  # On the compose network on purpose: a generator running on the host would add
+  # the Docker Desktop network hop to every sample, which is larger than the
+  # Redis round trip being measured.
+  k6:
+    image: grafana/k6:latest
+    container_name: ratelimiter-k6
+    profiles: ["load"]
+    volumes:
+      - ./k6:/k6
+    working_dir: /k6
+    environment:
+      BASE_URL: http://nginx
+    depends_on:
+      - nginx
